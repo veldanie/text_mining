@@ -7,7 +7,8 @@ from nltk.tokenize import word_tokenize
 import pandas as pd
 
 #Import state-of-the-union speech
-text_raw = pd.read_csv('./text-mining-tutorial/speech_data_extend.txt', sep='\t')
+text_raw = pd.read_csv('./speech_data_extend.txt', sep='\t')
+
 
 #Consider paragraphs after 2000.
 text_data = text_raw.loc[text_raw['year']>=2000, :]
@@ -24,7 +25,9 @@ stop_words = get_stop_words('en')
 from nltk.stem.porter import PorterStemmer
 st = PorterStemmer()
 docs = pd.Series(np.zeros(text_data.shape[0]))
-tokens = [] #All the list of words.
+tokens = [] #List of all words.
+# Download corpora if necessary: nl.download()
+
 
 for i, line in enumerate(text_data['speech']):
     #Tokenize the data:
@@ -45,17 +48,26 @@ unique_words = np.unique(tokens)
 lw = len(unique_words) # Number of words
 ld = len(docs) # Number of documents
 
+
 word_count = nl.FreqDist(tokens)
 tf = {k: 1+np.log(v) for k, v in word_count.items()}
 df = {k: np.sum(list(map(lambda x: k in x, docs))) for k in word_count.keys()}
 idf = {k: np.log(ld/v) for k, v in df.items()}
-rank = {k: v*u for k, v, u in zip(tf.keys(), tf.values(), idf.values())}
+# corrected as zip did not keep order
+#rank = {k: v*u for k, v, u in zip(tf.keys(), tf.values(), idf.values())}
+tfidf = {k : v * tf[k] for k, v in idf.items() if k in tf}
 
-# Based on the ranking we select aprox. 500 words.
-selected_words = {k: v for k, v in rank.items() if v>16.5}
-ls = len(selected_words) # Length of selected words.
 
-#Document-term matrix using aprox. 500 words selected using the tf-idf score.
+# Based on the ranking we select 500 words with highest tf-idf
+# 1st we get the rank
+import operator
+rank = sorted(tfidf.items(), key=operator.itemgetter(1), reverse=True)
+cutoff = rank[500][1]
+# 2nd apply the cut-off
+selected_words = {k: v for k, v in tfidf.items() if v>cutoff}
+ls = len(selected_words) # number of selected words: 500
+
+#Document-term matrix using 500 words selected using the tf-idf score.
 X = pd.DataFrame(np.zeros(shape = (ld, ls)), columns = selected_words.keys())
 
 for w in selected_words.keys():
