@@ -53,8 +53,6 @@ word_count = nl.FreqDist(tokens)
 tf = {k: 1+np.log(v) for k, v in word_count.items()}
 df = {k: np.sum(list(map(lambda x: k in x, docs))) for k in word_count.keys()}
 idf = {k: np.log(ld/v) for k, v in df.items()}
-# corrected as zip did not keep order
-#rank = {k: v*u for k, v, u in zip(tf.keys(), tf.values(), idf.values())}
 tfidf = {k : v * tf[k] for k, v in idf.items() if k in tf}
 
 
@@ -73,6 +71,8 @@ X = pd.DataFrame(np.zeros(shape = (ld, ls)), columns = selected_words.keys())
 for w in selected_words.keys():
     X[w] = list(map(lambda x: x.count(w), docs))
 
+
+
 #########################################################################
 #########################################################################
 #########################################################################
@@ -88,27 +88,79 @@ for w in selected_words.keys():
 ##3. Generate the tf-idf-weighted document-term matrix S. Perform SVD.
 
 tf = X.copy()
-tf[tf > 0] = 1+ np.log(X[X>0])
+tf[tf > 0] = 1+ np.log(X[X>0]) #term frequency for each word and each document.
 
 S = X.copy()
 for i in range(ls):
-    S[tf.columns[i]] = tf.iloc[:,i] * idf[tf.columns[i]]
-
-# Function that estimates Cosine similarity:
-def cos_sim (di, dj):
-    sim = np.dot(di,dj)/(np.sqrt(np.dot(di,di))*np.sqrt(np.dot(dj,dj)))
-    return (sim)
+    S[tf.columns[i]] = tf.iloc[:,i] * idf[tf.columns[i]] #tf*inverse document frequency
 
 # Singular Value Decomposition:
 S_svd = np.linalg.svd(S, full_matrices=1, compute_uv=1)
+#X = A SIGMA B
+A = S_svd[0]
+SIGMA = np.vstack((np.diag(S_svd[1]),np.zeros(shape = (ld-ls, ls))))
+B = S_svd[2]
+
+#We retain 200 singular values and approximate S.
+SIGMA2 = SIGMA.copy()
+for i in range(200,ls-1):
+    SIGMA2[i,i] = 0
+
+S_hat = A.dot(SIGMA2).dot(B)
 
 
-#########################################################################
-#########################################################################
-#########################################################################
+np.sum(text_data['president']=='Obama')
+np.sum(text_data['president']=='BushII')
+
+# Function that estimates Cosine similarity:
+def cos_sim (di, dj):
+    if np.sum(di)==0 or np.sum(dj)==0:
+        sim = 0
+    else:
+        sim = np.dot(di,dj)/(np.sqrt(np.dot(di,di))*np.sqrt(np.dot(dj,dj)))
+    return (sim)
+
+#Cosine similarites using S and S_hat:
+S_B = np.array(S)[text_data['president']=='BushII']
+S_O = np.array(S)[text_data['president']=='Obama']
+
+S_hat_B = S_hat[text_data['president']=='BushII']
+S_hat_O = S_hat[text_data['president']=='Obama']
+
+#Bush within Average Cosine Similarity:
+bb1 = np.mean([cos_sim(S_B[i],S_B[j]) for i in range(S_B.shape[0]) for j in range(S_B.shape[0])])
+bb2 = np.mean([cos_sim(S_hat_B[i],S_hat_B[j]) for i in range(S_hat_B.shape[0]) for j in range(S_hat_B.shape[0])])
+
+#Obama within Average Cosine Similarity:
+oo1 = np.mean([cos_sim(S_O[i],S_O[j]) for i in range(S_O.shape[0]) for j in range(S_O.shape[0])])
+oo2 = np.mean([cos_sim(S_hat_O[i],S_hat_O[j]) for i in range(S_hat_O.shape[0]) for j in range(S_hat_O.shape[0])])
+
+#Bush-Obama cross Average Cosine Similarity:
+bo1 = np.mean([cos_sim(S_B[i],S_O[j]) for i in range(S_B.shape[0]) for j in range(S_O.shape[0])])
+bo2 = np.mean([cos_sim(S_hat_B[i],S_hat_O[j]) for i in range(S_hat_B.shape[0]) for j in range(S_hat_O.shape[0])])
+
+ind = np.arange(3)  # the x locations for the groups
+width = 0.35
+
+fig, ax = plt.subplots()
+rects1 = ax.bar(ind, (bb1, oo1, bo1), width, color='r')
+rects2 = ax.bar(ind + width, (bb2, oo2, bo2), width, color='y')
+
+# add some text for labels, title and axes ticks
+ax.set_ylabel('Average Cosine Similarity')
+ax.set_title('Average Cosine Similarity \n within and across Bush and Obama (2000, 2014)')
+ax.set_xticks(ind + width / 2)
+ax.set_xticklabels(('Bush-Bush', 'Obama-Obama', 'Bush-Obama'))
+ax.legend((rects1[0], rects2[0]), ('S', 'S_hat'))
+
+plt.show()
+
+fig.savefig('cs.png')
+##################################################################################
+##################################################################################
+##################################################################################
 
 #4. Multinomial Mixture Model using EM algorithm:
-
 #First, we define the log-likelihood:
 def log_lik (X, B, rho):
     ll = np.sum(list(map(lambda x: np.log(np.sum([rho_i*np.prod(B_i**x) for rho_i, B_i in zip(rho, B)])), np.array(X))))
@@ -120,6 +172,7 @@ B = np.random.dirichlet(np.ones(ls), K) #Initial Beta matrix.
 rho = np.ones(K)/K # Initial rho vector.
 max_iter = 100 # Max number of iterations
 ll = [log_lik(X,B,rho)]
+
 for i in range(max_iter):
     #E-step (lecture 3, slide 19):
     z = np.array(list(map(lambda x: [rho_i*np.prod(B_i**x) for rho_i, B_i in zip(rho, B)], np.array(X))))
@@ -140,10 +193,13 @@ for i in range(max_iter):
 ## Top terms per topic:
 top_terms = []
 for k in range(K):
-    new_terms = X.columns[B[k]>0.006]
+    new_terms = X.columns[B[k]>0.0055]
     top_terms.append(new_terms)
 
+fig, ax = plt.subplots()
 plt.plot(ll)
-plt.xlabel('Iterations');plt.ylabel('log-likelihood')
-plt.title('log-likelihood')
+plt.xlabel('Iterations');plt.ylabel('Log-likelihood')
+plt.title('Log-likelihood Function')
 plt.show()
+
+fig.savefig('ll.png')
